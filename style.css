@@ -21,8 +21,13 @@ button[type=submit]{background:var(--l1);border:0;color:#fff;font-weight:600;
   padding:12px 24px;border-radius:8px;cursor:pointer;font-size:14px}
 .examples{display:flex;gap:6px;flex-wrap:wrap;align-items:center;
   color:var(--dim);font-size:12.5px;margin:12px 0 0}
+/* The label gets the same box model as the pills — same font-size, line-height,
+   vertical padding and a transparent border — so every item in the row is exactly
+   the same height and sits on one baseline. */
+.examples>span{font-size:12px;line-height:1.5;padding:4px 2px 4px 0;
+  border:1px solid transparent;flex:none}
 .ex{background:var(--panel);border:1px solid var(--line);color:var(--dim);cursor:pointer;
-  font-size:12px;padding:4px 10px;border-radius:99px;font-family:inherit}
+  font-size:12px;line-height:1.5;padding:4px 10px;border-radius:99px;font-family:inherit}
 .ex:hover{color:var(--ink);border-color:var(--l1)}
 main{margin-top:30px}
 .note{color:var(--dim);padding:14px 0}
@@ -119,3 +124,5 @@ footer code{color:var(--ink)}
 .msub{display:block;color:var(--dim);font-size:12px}
 .msub.mono{font-family:ui-monospace,Menlo,monospace;font-size:11px;word-break:break-all}
 .ma{text-align:right;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;white-space:nowrap}
+
+h2.first{margin-top:0}

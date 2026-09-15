@@ -78,6 +78,10 @@ function render(input, { facts, counterparts }) {
       ${sub ? `<em>${esc(sub)}</em>` : ''}</div>`).join('');
 
   out.innerHTML = `
+    <h2 class="first">Facts</h2>
+    <div class="facts">${facts_}</div>
+
+    <h2>Verdict</h2>
     <div class="verdict ${s.band.tone}">
       ${dial(s.total, s.band.tone)}
       <div class="vhead">
@@ -103,9 +107,6 @@ function render(input, { facts, counterparts }) {
       <div class="powers">${s.powers.map(p => `<div class="power">
         <b>${esc(p.label)}</b> — <code>${esc(p.method)}()</code>
         <p>${esc(p.why)}</p></div>`).join('')}</div>` : ''}
-
-    <h2>Facts</h2>
-    <div class="facts">${facts_}</div>
 
     ${!facts.isContract ? `<h2>Cross-layer presence</h2>
       <div class="linked">${counterparts.length
