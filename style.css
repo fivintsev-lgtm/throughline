@@ -20,7 +20,7 @@ input:focus{outline:2px solid var(--l1);outline-offset:-1px}
 button[type=submit]{background:var(--l1);border:0;color:#fff;font-weight:600;
   padding:12px 24px;border-radius:8px;cursor:pointer;font-size:14px}
 .examples{display:flex;gap:6px;flex-wrap:wrap;align-items:center;
-  color:var(--dim);font-size:12.5px;margin:12px 0 0}
+  color:var(--dim);font-size:12.5px;margin-block:12px 0}
 /* The label gets the same box model as the pills — same font-size, line-height,
    vertical padding and a transparent border — so every item in the row is exactly
    the same height and sits on one baseline. */
