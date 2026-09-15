@@ -1,106 +1,136 @@
-import { resolve, detect, L1, L2 } from './chains.js';
+import { profile, detect, L1 } from './chains.js';
+import { score, classify } from './trust.js';
 
 const out = document.getElementById('out');
 const q = document.getElementById('q');
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const short = a => !a ? '—' : (a.length > 20 ? `${a.slice(0, 10)}…${a.slice(-6)}` : a);
-const when = t => { const d = new Date(t); return isNaN(d) ? '' : d.toISOString().slice(0, 10); };
-const num = (n, p = 4) => Number(n || 0).toLocaleString('en', { maximumFractionDigits: p });
+const short = a => !a ? '—' : (a.length > 24 ? `${a.slice(0, 12)}…${a.slice(-8)}` : a);
+const n0 = n => Number(n || 0).toLocaleString('en', { maximumFractionDigits: 0 });
+const usd = v => v == null ? 'unpriced' : '$' + Number(v).toLocaleString('en', { maximumFractionDigits: v < 100 ? 2 : 0 });
+const ago = ts => {
+  if (!ts) return 'never';
+  const d = (Date.now() - new Date(ts)) / 86400000;
+  if (d < 1) return 'today';
+  if (d < 60) return `${Math.round(d)}d ago`;
+  if (d < 730) return `${Math.round(d / 30)}mo ago`;
+  return `${(d / 365).toFixed(1)}y ago`;
+};
+const link = (layer, addr) => layer === L1
+  ? `https://tzkt.io/${addr}` : `https://explorer.etherlink.com/address/${addr}`;
 
-const explorer = (layer, hash) => layer === L1
-  ? `https://tzkt.io/${hash}`
-  : `https://explorer.etherlink.com/tx/${hash}`;
-
-function card(a, label) {
-  if (!a || a.error) return `<div class="card"><h3>${label}</h3>
-    <div class="note">${esc(a?.error || 'not found')}</div></div>`;
-  const flags =
-    (a.kind === 'contract' ? '<span class="badge">contract</span>' : '') +
-    (a.scam ? '<span class="badge warn">flagged</span>' : '') +
-    (a.alias ? `<span class="badge">${esc(a.alias)}</span>` : '');
-  return `<div class="card ${a.layer}">
-    <h3>${label}${flags}</h3>
-    <div class="addr">${esc(a.addr)}</div>
-    <div class="stats">
-      <span><b>${num(a.balance)}</b> ${a.symbol}</span>
-      <span><b>${num(a.txCount, 0)}</b> txs</span>
-      ${a.tokenTransfers != null ? `<span><b>${num(a.tokenTransfers, 0)}</b> token xfers</span>` : ''}
-    </div></div>`;
+function dial(total, tone) {
+  const C = 2 * Math.PI * 42;
+  const on = C * (total / 100);
+  const col = { good: '#22c55e', warn: '#f59e0b', bad: '#f87171' }[tone];
+  return `<div class="dial">
+    <svg width="96" height="96" viewBox="0 0 96 96">
+      <circle cx="48" cy="48" r="42" fill="none" stroke="#272e38" stroke-width="7"/>
+      <circle cx="48" cy="48" r="42" fill="none" stroke="${col}" stroke-width="7"
+        stroke-linecap="round" stroke-dasharray="${on} ${C - on}"/>
+    </svg><div class="n" style="color:${col}">${total}</div></div>`;
 }
 
-function row(e) {
-  if (e.layer === 'BRIDGE') {
-    const amt = e.amount == null
-      ? `<span class="badge">${esc(e.asset)}</span>`   // FA token, decimals unresolved
-      : `${num(e.amount)} XTZ`;
-    return `<li class="BRIDGE">
-      <span class="lyr">BRIDGE</span>
-      <span class="what"><span class="k">L1 → L2 deposit</span>
-        <div class="cp">${esc(short(e.l1))} → ${esc(short(e.l2))}${e.proxy ? ' (via proxy)' : ''}</div></span>
-      <span><span class="amt">${amt}</span><br>
-        <time>${when(e.ts)}</time></span></li>`;
-  }
-  const sign = e.amount ? (e.out ? '−' : '+') : '';
-  const cls = e.amount ? (e.out ? 'out' : 'in') : '';
-  return `<li class="${e.layer}">
-    <span class="lyr">${e.layer}</span>
-    <span class="what"><span class="k">${esc(e.kind)}</span>
-      ${e.failed ? '<span class="fail"> failed</span>' : ''}
-      <div class="cp">${esc(e.counterpartyAlias || short(e.counterparty))}</div></span>
-    <span><span class="amt ${cls}">${e.amount ? sign + num(e.amount) + ' XTZ' : ''}</span><br>
-      <time><a href="${explorer(e.layer, e.hash)}" target="_blank" rel="noopener">${when(e.ts)}</a></time>
-    </span></li>`;
-}
+function render(input, { facts, counterparts }) {
+  const cls = classify(facts);
+  const s = score(facts, cls.kind);
 
-function render(r) {
-  const originIsL1 = r.origin === L1;
-  const searched = originIsL1 ? 'Tezos L1 (searched)' : 'Etherlink L2 (searched)';
-  const found = originIsL1 ? 'Etherlink L2 (linked)' : 'Tezos L1 (linked)';
-  const left = originIsL1 ? r.selfAcct : r.otherAcct;
-  const right = originIsL1 ? r.otherAcct : r.selfAcct;
+  const name = facts.contractName || facts.alias;
+  const conf = cls.confidence === 'high' ? '' :
+    ` <span class="chip">${cls.confidence === 'none' ? 'unclassified' : cls.confidence + ' confidence'}</span>`;
 
-  if (!r.counterparts.length) {
-    out.innerHTML = `<div class="link">${card(r.selfAcct, searched)}</div>
-      <p class="note">No bridge deposits found, so this address has no counterpart we can
-      prove on-chain. It may still have one — this slice only reads L1→L2 deposits.</p>
-      <h2>Activity</h2><ol>${r.timeline.map(row).join('')}</ol>`;
-    return;
-  }
+  const chips = [
+    `<span class="chip ${facts.layer}">${facts.layer === L1 ? 'Tezos L1' : 'Etherlink L2'}</span>`,
+    `<span class="chip">${esc(facts.kindLabel)}</span>`,
+    facts.isContract
+      ? (facts.verified ? '<span class="chip on">source verified</span>'
+                        : '<span class="chip off">source unverified</span>')
+      : '',
+    facts.proxyType ? '<span class="chip off">proxy</span>' : '',
+    facts.isContract
+      ? (facts.txs30d > 0 ? '<span class="chip on">active</span>'
+                          : '<span class="chip off">no activity in 30d</span>')
+      : '',
+  ].filter(Boolean).join('');
 
-  const total = r.counterparts.reduce((s, c) => s + c.count, 0);
-  const others = r.counterparts.slice(1);
+  const parts = s.parts.map(p => {
+    const pct = p.informational ? 0 : Math.max(0, (p.got / (p.max || 1)) * 100);
+    const val = p.informational ? 'not scored'
+      : p.penalty ? `${p.got} pts` : `${p.got} / ${p.max}`;
+    return `<div class="part ${p.tone}">
+      <div class="prow"><span class="plabel">${esc(p.label)}</span>
+        <span class="pscore">${val}</span></div>
+      <p class="pnote">${esc(p.note)}</p>
+      ${p.informational || p.penalty ? '' : `<div class="bar"><i style="width:${pct}%"></i></div>`}
+    </div>`;
+  }).join('');
+
+  const facts_ = [
+    ['Activity (30d)', facts.isContract ? n0(facts.txs30d) : n0(facts.txs30d),
+      facts.txs30dApprox ? 'estimated from recent page' : (facts.isContract ? 'calls received' : 'transactions')],
+    ['Lifetime txs', n0(facts.lifetimeTxs), ''],
+    ['Last active', ago(facts.lastActivity), facts.isContract ? '' : 'not scored for wallets'],
+    ['First seen', ago(facts.firstActivity), facts.firstActivityApprox ? 'floor — earlier history may exist' : ''],
+    ['Value held', usd(facts.tvlUsd), facts.tvlPartial ? 'excludes unpriced tokens' : ''],
+    ['Token positions', n0(facts.tokenPositions), ''],
+  ].map(([k, v, sub]) => `<div class="fact"><span>${k}</span><b>${esc(v)}</b>
+      ${sub ? `<em>${esc(sub)}</em>` : ''}</div>`).join('');
 
   out.innerHTML = `
-    <div class="link">
-      ${card(left, originIsL1 ? searched : found)}
-      <div class="seam"><div class="n">${total}</div>bridge<br>deposits</div>
-      ${card(right, originIsL1 ? found : searched)}
+    <div class="verdict ${s.band.tone}">
+      ${dial(s.total, s.band.tone)}
+      <div class="vhead">
+        <p class="band">${s.band.label} · ${s.total}/100</p>
+        <p class="what">${name ? `<b>${esc(name)}</b> — ` : ''}<b>${esc(cls.kind)}</b>${conf}
+          ${cls.note ? `<br><span>${esc(cls.note)}</span>` : ''}
+          ${cls.matched?.length ? `<br><span>Identified from its interface: <code>${cls.matched.slice(0, 6).map(esc).join('</code>, <code>')}</code></span>` : ''}
+        </p>
+        <div class="chips">${chips}</div>
+        <div class="addrline"><a href="${link(facts.layer, facts.addr)}" target="_blank"
+          rel="noopener">${esc(facts.addr)}</a></div>
+      </div>
     </div>
 
-    ${others.length ? `<div class="alsofrom">
-      <b>${others.length} other linked ${originIsL1 ? 'L2' : 'L1'}
-      ${others.length === 1 ? 'address' : 'addresses'}</b> — the link is many-to-many, so this
-      is evidence, not proof of one owner:
-      ${others.map(c => `<code>${esc(short(c.addr))}</code> ×${c.count}`).join(', ')}
-    </div>` : ''}
+    ${s.flags.length ? `<div class="flags">${s.flags.map(f =>
+      `<div class="flag ${f.level}"><i>${f.level === 'critical' ? '✕' : '!'}</i>
+       <span>${esc(f.text)}</span></div>`).join('')}</div>` : ''}
 
-    <h2>Unified timeline — ${r.timeline.length} events, both layers</h2>
-    <ol>${r.timeline.map(row).join('')}</ol>`;
+    <h2>Why this score</h2>
+    <div class="parts">${parts}</div>
+
+    ${s.powers.length ? `<h2>Who can change things</h2>
+      <div class="powers">${s.powers.map(p => `<div class="power">
+        <b>${esc(p.label)}</b> — <code>${esc(p.method)}()</code>
+        <p>${esc(p.why)}</p></div>`).join('')}</div>` : ''}
+
+    <h2>Facts</h2>
+    <div class="facts">${facts_}</div>
+
+    ${!facts.isContract ? `<h2>Cross-layer presence</h2>
+      <div class="linked">${counterparts.length
+        ? `${facts.bridgeDeposits} bridge ${facts.bridgeDeposits === 1 ? 'deposit' : 'deposits'}
+           link this address to ${counterparts.length} address${counterparts.length === 1 ? '' : 'es'}
+           on ${facts.layer === L1 ? 'Etherlink' : 'Tezos L1'}:
+           ${counterparts.slice(0, 4).map(a =>
+             `<code><a href="${link(facts.layer === L1 ? 'L2' : L1, a)}" target="_blank" rel="noopener">${esc(short(a))}</a></code>`).join(', ')}.
+           Bridge deposits are evidence of the same user, not proof — the relationship is
+           many-to-many, so treat this as a strong hint rather than an identity.`
+        : `No bridge activity found, so we cannot link this address to the other layer.
+           That is not suspicious on its own — most addresses never bridge.`}
+      </div>` : ''}`;
 }
 
 async function go(v) {
-  const det = detect(v);
-  if (!det) { out.innerHTML = `<div class="err">Not a Tezos (tz1/tz2/tz3/KT1) or
-    Etherlink (0x…) address.</div>`; return; }
-  out.innerHTML = `<p class="note">Querying both layers…</p>`;
-  try { render(await resolve(v)); }
+  if (!detect(v)) {
+    out.innerHTML = `<div class="err">Not a Tezos (tz1/tz2/tz3/KT1) or Etherlink (0x…) address.</div>`;
+    return;
+  }
+  out.innerHTML = `<p class="note">Reading both layers…</p>`;
+  try { render(v, await profile(v)); }
   catch (e) { out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
 }
 
-document.getElementById('f').addEventListener('submit', ev => {
-  ev.preventDefault(); go(q.value);
-});
+document.getElementById('f').addEventListener('submit', e => { e.preventDefault(); go(q.value); });
 document.querySelectorAll('.ex').forEach(b =>
   b.addEventListener('click', () => { q.value = b.dataset.a; go(b.dataset.a); }));

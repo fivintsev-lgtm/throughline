@@ -1,87 +1,109 @@
 # Throughline
 
-**One user, two layers.** Paste a Tezos L1 address or an Etherlink L2 address and get the
-other half of the story — the linked identity on the opposite layer, and a single merged
-timeline of both.
+**Is this safe, and is it still alive?** Paste any wallet or contract from **Tezos L1** or
+**Etherlink L2** into one box. Get a trust score, a plain-language reason for every point,
+and a read on what the contract actually *is* — DEX, lending market, NFT marketplace, oracle.
 
-Built in 60 minutes as a take-home exercise. Working thin slice, live mainnet data.
-
-## The idea in one paragraph
-
-There is no such thing as "this address" across Tezos L1 and Etherlink. L1 identities are
-base58 (`tz1`/`KT1`), L2 identities are 20-byte EVM (`0x…`) — different keyspaces. TzKT sees
-L1 and stops at the rollup boundary; Blockscout sees L2 and starts after it. So a user's own
-history is split in half with no seam, and today you reconcile it by hand across two tabs.
-
-The only on-chain link is the **bridge deposit**, which carries the destination L2 address as
-raw bytes inside a Michelson parameter — a field no explorer decodes. Throughline decodes it
-and joins the two sides.
-
-**This is a join, not another explorer.**
-
-## Run it
-
-No build step, no dependencies, no API keys.
+Live mainnet data. No backend, no API keys, no build step.
 
 ```bash
-python3 -m http.server 8777
-# open http://127.0.0.1:8777
+python3 -m http.server 8777   # then open http://127.0.0.1:8777
+node test.mjs                 # 23 scoring tests, no network needed
 ```
 
-(It must be served rather than opened as a `file://` URL, because it uses ES modules.)
+(Must be served, not opened as `file://` — it uses ES modules.)
 
-Try `tz1UFH6EiW8aiUFisw7r3WBxXojUs9wULCrN` (L1) or
-`0x3276f9890DF42542B006eAED2db9b07D2FAD8b24` (L2) — they resolve to each other.
+## The idea: wallets and contracts are not the same animal
 
-## How the join works
+Most "address checker" tools run one scoring model over everything. That is wrong, and it
+is wrong in a way that actively misleads people. **Silence means opposite things for the
+two.**
 
-The Etherlink smart rollup on L1 is `sr1Ghq66tYK9y3r8CC1Tf8i8m5nxh8nTvZEf`. A deposit is a
-transaction to it whose parameter looks like:
+| Signal | Wallet | Contract |
+|---|---|---|
+| Nothing for 200 days | **Normal.** Cold storage looks exactly like this. Not scored. | **Severe.** A contract can't act on its own — no calls means no users. |
+| Empty balance | Weak signal | Severe *if* it should custody funds |
+| Huge lifetime tx count | Good | **Nearly meaningless on its own** — see below |
+| Unverified source | N/A | Major |
+| Admin can upgrade | N/A | Major |
 
-```json
-{ "initiator": { "address": "tz1UFH6E…" },
-  "parameter": { "value": { "LL": {
-      "bytes": "3276f9890df42542b006eaed2db9b07d2fad8b24",
-      "ticket": { "amount": "1000000", "address": "KT1CeFqj…" } } } } }
-```
+A wallet is a person who may simply be doing nothing. A contract is a service, and a
+service with no users is dead. So Throughline scores them on different axes entirely, and
+for wallets it prints dormancy as a fact while explicitly **refusing to score it**.
 
-`initiator` is the L1 identity. `bytes` is the L2 address. That one field is the join.
+Real case the tool catches: a Tezos oracle with **4.1M lifetime calls** and **zero in the
+last 30 days**. Any lifetime-volume-based score rates it highly. It has been dead since March.
 
-Both directions work:
+## Liquidity is judged against custody, not blindly
 
-| Direction | Query |
-|---|---|
-| L1 → L2 | `/v1/operations/transactions?initiator={tz1}&target={rollup}` |
-| L2 → L1 | `/v1/operations/transactions?target={rollup}&parameter.LL.bytes={hex}` |
+You asked for TVL to count, and it does — but applying it uniformly was the most misleading
+bug in the first cut of the scorer. A **pool, lending market, farm or bridge** should hold
+value; thin reserves there are a genuine warning about slippage and solvency. A **router,
+marketplace or oracle** passes value straight through and holds nothing by design.
 
-### Two things that only show up against real data
+3Route v4 — a live DEX aggregator with ~7,900 calls a month — holds zero XTZ. Scoring it
+on TVL punished correct behaviour. Now liquidity is scored only for custodial archetypes
+and reported as context for everything else.
 
-**Routing info is variable-length.** It is not always a bare 20-byte address — mainnet also
-carries 40-byte (receiver + proxy) and other shapes. Blindly prefixing `0x` onto the blob
-invents addresses that don't exist; on one test address that turned 4 real counterparts into
-19 fake ones. We take the first 20 bytes and skip shapes we don't recognise.
+L2 holdings are priced for real (Blockscout returns a per-token `exchange_rate`). On L1 only
+the XTZ leg can be priced, so unpriced token positions are **excluded and labelled**, never
+guessed at.
 
-**The link is many-to-many.** One L2 address can be funded by several L1 addresses and vice
-versa. So the UI shows linked identities as *evidence* — with a deposit count and date range
-— and never claims "this is you". Asserting a 1:1 identity would be a lie.
+## What the score is made of
+
+**Contracts** — Liveness 35 · Liquidity 25 *(custodial only)* · Transparency 20 ·
+Track record 20 · minus up to 25 for admin powers.
+
+**Wallets** — History 40 · Holdings 25 · Ecosystem footprint 35. Dormancy: reported, never scored.
+
+Scores are normalised over the categories that actually applied, so skipping an
+inapplicable one rescales rather than silently capping the ceiling. Hard flags (scam label,
+contract dead 30d) override the arithmetic and cap the result at 35.
+
+## "Who can change things"
+
+Classification reads entrypoint names (L1 Michelson) and ABI function names (L2 Solidity).
+The same read exposes the real risk surface — privileged functions:
+
+`upgrade` / `updateContract` → code can be replaced, so today's audit says nothing about
+tomorrow. `withdrawTokens` / `sweep` → an admin can move funds out. `setAdmin`, `pause`,
+`updateWhitelist`, `mint` → operator control.
+
+Being upgradeable is not proof of bad intent — plenty of good protocols are — but it means
+your risk includes trusting the operator, not just the code. The tool says exactly that.
+
+## Cross-layer
+
+For wallets, Throughline also links the two layers. L1 identities are base58 (`tz1`/`KT1`),
+L2 are 20-byte EVM (`0x…`) — different keyspaces, so "the same address" doesn't exist across
+them. The only on-chain join is the bridge deposit to rollup
+`sr1Ghq66tYK9y3r8CC1Tf8i8m5nxh8nTvZEf`, which carries the destination L2 address as raw bytes
+in a Michelson parameter that no explorer decodes. Having verifiably used both layers is
+strong evidence a wallet isn't disposable, so it feeds the footprint score.
+
+That link is **many-to-many** (one L2 address here is funded by three different L1 addresses),
+so it is presented as evidence, never as "this is you".
 
 ## Architecture
 
 ```
-index.html   markup
-style.css    styles
-app.js       rendering only
-chains.js    every network call, behind plain functions returning normalised events
+chains.js   every network call; the only file that knows TzKT or Blockscout exist
+trust.js    classification + scoring. PURE — no network, no DOM, fully testable
+test.mjs    23 tests pinning the judgement calls
+app.js      rendering only
 ```
 
-`chains.js` is deliberately the only file that knows about TzKT or Blockscout, so swapping a
-data source or adding a chain doesn't touch the UI.
+`trust.js` is pure on purpose: every verdict is a function of a plain facts object, so the
+scoring can be unit-tested and argued with rather than taken on faith.
 
-## Scope
+## Limits — read these
 
-**In:** L1→L2 deposit linking (both lookup directions), per-layer balances and counts,
-merged cross-layer timeline, many-to-many disclosure.
-
-**Out, deliberately:** L2→L1 withdrawals (needs outbox-proof decoding and the ~15-day
-challenge window), FA token amounts (needs per-token decimals — shown as `token` rather than
-a number I can't verify), deep pagination, and any backend. Reasoning in `../02-RATIONALE.md`.
+- **Heuristics, not an audit.** A good score is not a recommendation. This measures
+  liveness, depth, transparency and operator power — not whether the code is correct.
+- Reputable protocols get penalised for admin powers they may use responsibly. Deliberate:
+  the tool reports the capability, and says plainly that capability ≠ intent.
+- L1 has no source-verification concept, so L1 contracts cap lower on transparency than L2
+  ones. That asymmetry is real, not a bug, but it makes cross-layer score comparison unfair.
+- L2 activity counts come from one page of recent transactions and are **estimates**,
+  labelled as such in the UI. L1 counts are exact.
+- No price impact, holder concentration, or token-approval risk. See `RATIONALE.md`.
