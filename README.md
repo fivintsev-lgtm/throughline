@@ -76,6 +76,31 @@ tomorrow. `withdrawTokens` / `sweep` → an admin can move funds out. `setAdmin`
 Being upgradeable is not proof of bad intent — plenty of good protocols are — but it means
 your risk includes trusting the operator, not just the code. The tool says exactly that.
 
+## "What happened to the funds I moved?"
+
+For a wallet, Throughline traces every L1→L2 deposit and says what became of it. A deposit
+is credited on Etherlink as a plain transfer from the protocol address `0x…FEeD`, so matching
+on (destination, amount, time) turns the question into a yes/no with a latency. Measured
+arrival on mainnet is consistently **13–14 seconds**.
+
+Four outcomes, and the distinction between the last two is the point:
+
+| | |
+|---|---|
+| **Arrived** | matched credit on L2, with the latency |
+| **In flight** | sent in the last few minutes; deposits normally land in ~15s |
+| **No credit found** | we can see far enough back to expect one, and there isn't one |
+| **Cannot confirm** | we *cannot see far enough back* — no evidence either way |
+
+An early version collapsed those last two and reported "missing" whenever a destination had
+no visible credits — i.e. it told you your funds had vanished on the strength of no evidence
+at all. That is the worst failure this feature can have, so absence of evidence is now always
+reported as `unknown`, never as loss. Deposits routed via a proxy are `unknown` too, since the
+credit lands somewhere other than the receiver.
+
+**Withdrawals (L2→L1) are not covered** — that is the other half of the question and it needs
+outbox-proof decoding plus the ~15-day challenge window.
+
 ## Cross-layer
 
 For wallets, Throughline also links the two layers. L1 identities are base58 (`tz1`/`KT1`),

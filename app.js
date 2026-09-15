@@ -1,4 +1,4 @@
-import { profile, detect, L1 } from './chains.js';
+import { profile, traceFunds, detect, L1 } from './chains.js';
 import { score, classify } from './trust.js';
 
 const out = document.getElementById('out');
@@ -118,7 +118,58 @@ function render(input, { facts, counterparts }) {
            many-to-many, so treat this as a strong hint rather than an identity.`
         : `No bridge activity found, so we cannot link this address to the other layer.
            That is not suspicious on its own — most addresses never bridge.`}
-      </div>` : ''}`;
+      </div>
+      <div id="trace"></div>` : ''}`;
+
+  if (!facts.isContract && facts.bridgeDeposits > 0) renderTrace(facts.addr);
+}
+
+/* "What happened to the funds I moved?" — answered per deposit. */
+const STATUS = {
+  arrived: { cls: 'good', icon: '✓', word: 'Arrived' },
+  pending: { cls: 'warn', icon: '…', word: 'In flight' },
+  missing: { cls: 'bad',  icon: '✕', word: 'No credit found' },
+  unknown: { cls: 'info', icon: '?', word: 'Cannot confirm' },
+};
+
+async function renderTrace(addr) {
+  const host = document.getElementById('trace');
+  if (!host) return;
+  host.innerHTML = `<h2>What happened to the funds you moved</h2>
+    <p class="note">Matching each L1 deposit to its credit on L2…</p>`;
+  let r;
+  try { r = await traceFunds(addr); }
+  catch (e) { host.innerHTML = `<h2>What happened to the funds you moved</h2>
+    <div class="err">${esc(e.message)}</div>`; return; }
+
+  const by = r.moves.reduce((m, x) => (m[x.status] = (m[x.status] || 0) + 1, m), {});
+  const shown = r.moves.slice(0, 12);
+  const lat = r.moves.filter(m => m.status === 'arrived').map(m => m.latencySec);
+  const med = lat.length ? lat.sort((a, b) => a - b)[Math.floor(lat.length / 2)] : null;
+
+  host.innerHTML = `<h2>What happened to the funds you moved</h2>
+    <div class="tsum">
+      ${Object.entries(by).map(([k, v]) =>
+        `<span class="tpill ${STATUS[k].cls}">${STATUS[k].icon} ${v} ${esc(STATUS[k].word.toLowerCase())}</span>`).join('')}
+      ${med != null ? `<span class="tpill">median arrival ${med}s</span>` : ''}
+    </div>
+    <div class="moves">${shown.map(m => {
+      const st = STATUS[m.status];
+      return `<div class="move ${st.cls}">
+        <span class="mi">${st.icon}</span>
+        <span class="mw"><b>${esc(st.word)}</b>
+          ${m.status === 'arrived' ? `<span class="msub">credited on Etherlink ${m.latencySec}s later</span>`
+                                   : `<span class="msub">${esc(m.reason || '')}</span>`}
+          <span class="msub mono">${esc(short(m.l1))} → ${esc(short(m.l2))}</span></span>
+        <span class="ma">${m.amount == null ? 'token' : m.amount + ' XTZ'}<br>
+          <time><a href="https://tzkt.io/${esc(m.hash)}" target="_blank" rel="noopener">${esc(m.ts.slice(0, 10))}</a></time></span>
+      </div>`;
+    }).join('')}</div>
+    ${r.moves.length > shown.length ? `<p class="note">Showing ${shown.length} of ${r.moves.length}.</p>` : ''}
+    <p class="note"><b>Read the “cannot confirm” count carefully.</b> It means we could not see
+    far enough back in Etherlink history to match that deposit — not that the funds are gone.
+    Confirmation only reaches back to ${r.horizon ? esc(new Date(r.horizon).toISOString().slice(0, 10)) : 'the visible window'}.
+    Withdrawals from L2 back to L1 are not covered here at all.</p>`;
 }
 
 async function go(v) {
