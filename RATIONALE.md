@@ -1,77 +1,76 @@
 # Throughline — rationale
 
-**Problem space 2:** answering an on-chain question that's tedious today.
+**Problem space 5:** knowing what's safe and what's live. (Started in space 2 — the
+cross-layer identity join survives as one signal inside this.)
 
 ## The problem
-"What happened to the funds I moved?" and "what has this address been doing across L1 and
-Etherlink?" are the two questions a Tezos user cannot answer today without manual work.
-
-The reason is sharper than "explorers are per-layer". It's this:
-
-> **There is no such thing as "this address" across the two layers.**
-> Tezos L1 identities are base58 (`tz1`/`tz2`/`KT1`). Etherlink L2 identities are 20-byte
-> EVM (`0x…`). Different keyspaces. The same human has two unrelated identities and
-> nothing on either explorer connects them.
-
-TzKT sees L1 and stops at the rollup boundary. Blockscout sees L2 and starts after it.
-The user's own history is cut in half with no seam. Today you reconcile it by hand,
-by timestamp and amount, across two tabs.
-
-The only on-chain join key is the **bridge deposit** — and it sits inside a Michelson
-parameter as a raw byte blob that no UI decodes.
-
-**So this is a join, not another explorer.** That reframe is the whole idea.
+Before using an Etherlink dApp or sending to an address, a user wants a fast read on
+"is this legit, is it active, what am I risking?" Today that means opening two different
+explorers, knowing which fields matter, and knowing what a normal value looks like. Every
+part of that assumes expertise the person asking does not have.
 
 ## Who it's for
-In order of pain: (1) a user who bridged and thinks funds are lost — the highest-anxiety,
-highest-support-cost moment in the ecosystem; (2) support and community teams answering
-that ticket; (3) analysts and BD who currently cannot say how many L1 users became
-Etherlink users, because nobody can join the two sides.
+Someone about to interact with an address they were given — a dApp contract from a link, or
+a counterparty wallet. Then: support teams triaging "is this a scam?", and anyone doing
+light diligence who is not a Solidity reader.
 
-## Why it matters
-Etherlink's growth story depends on L1 users crossing over. Right now **nobody can measure
-that crossing**, because the join doesn't exist in any tool. The same missing primitive
-that makes a user anxious makes the funnel unmeasurable. Fix it once, get both.
+## The insight this is built on
+**A wallet and a contract must be scored on different axes, because the same signal means
+opposite things.**
+
+Most address checkers run one model over everything. Silence is the clearest case: a wallet
+idle for 200 days is cold storage — completely normal, and Throughline prints it as a fact
+while explicitly refusing to score it. A contract idle for 30 days has no users, because a
+contract cannot act on its own. Same signal, opposite verdicts.
+
+The case that proves it: a Tezos oracle with **4.1M lifetime calls and zero in the last 30
+days**. Any score built on lifetime volume rates it highly. It has been dead since March.
+
+A second, sharper version of the same mistake nearly shipped in my own scorer: I penalised
+a live DEX **aggregator** for holding no funds. Routers, marketplaces and oracles pass value
+through and hold nothing *by design*. So liquidity is now scored only for archetypes that
+should custody funds — pools, lending markets, farms, bridges — and reported as context
+otherwise. **Applying TVL uniformly punishes correct behaviour.**
 
 ## The single key assumption
-**That the bridge deposit is a good enough identity link to be useful, even though it is
-not proof of ownership.**
+**That behavioural signals — liveness, depth, operator power, track record — are a more
+useful proxy for everyday risk than code analysis, for the person actually asking.**
 
-It is explicitly many-to-many — I verified one L2 address funded by three different L1
-addresses, and one L1 address depositing to four different L2 addresses. So the product
-must present linked identities as *evidence with a count and a date range*, never as
-"this is you". The UI does exactly that, and names the ambiguity on screen.
-If that framing doesn't survive contact with users, the idea needs rethinking.
+The tool never reads contract logic. It cannot detect a clever exploit or a malicious
+implementation behind a proxy. It bets that most real-world loss comes from mundane
+things — dead protocols, empty pools, contracts whose admin can rug — and that those are
+cheap to measure. If real losses are dominated by code-level exploits, this is the wrong tool.
 
 ## What it delivers
-- **Support cost ↓.** The "where are my funds" ticket becomes a link, not an investigation.
-- **The missing funnel metric.** L1→L2 user conversion becomes countable for the first
-  time: how many unique L1 addresses ever bridged, how many stayed, how much followed them.
-  That is a BD and ecosystem-growth number nobody currently has.
-- **Distribution wedge.** The join is the hard part and it's reusable — wallets, support
-  tooling and dashboards all need the same primitive.
+- **Fewer avoidable losses**, which is retention. Users who get rugged in week one don't return.
+- **Support deflection.** "Is this legit?" becomes a link.
+- **A live protocol census.** Scoring every contract on both layers produces something
+  nobody has: how many Etherlink protocols are actually alive, and how much value sits in
+  abandoned ones. That is an ecosystem-health metric for BD and grants.
+- **Distribution wedge.** Wallets and explorers all want a pre-transaction risk read.
 
 ## How I'd validate it cheaply, for real
-1. **Cheapest, this week:** take the last ~50 "where are my funds / bridge" questions from
-   Discord and support, run each address through this tool, and count how many are answered
-   outright. That's a real hit-rate on real demand, and it costs an afternoon. If it's
-   below ~50%, my framing of the problem is wrong.
-2. **Next:** run the aggregate once over all deposits to the rollup and see whether L1→L2
-   conversion is a number anyone reacts to. If ecosystem/BD don't care, the second value
-   prop dies and this stays a support tool.
-3. **Only then** consider whether it's a product or a feature inside an existing explorer.
-   Honestly, the likeliest good outcome is that TzKT or Blockscout should ship this join,
-   and the fastest route to impact is a PR to them, not a startup.
+1. **This week:** run the tool over every contract flagged in Discord scam reports in the
+   last 3 months. What share does it rate below 50? That's a real hit-rate on real
+   incidents, costing an afternoon. Below ~60% and the behavioural bet is wrong.
+2. **Control for false positives:** run it over the 50 most-used legitimate contracts on
+   both layers. If reputable protocols land in "Avoid" because of admin powers, the
+   weighting is miscalibrated and I'd rather learn that from data than argue about it.
+3. **Then demand:** put it behind one link in a support channel and count unprompted uses.
+4. Only then ask whether it's a product or a feature inside a wallet.
 
 ## What I deliberately left out, and why
 | Cut | Why | What would change my mind |
 |---|---|---|
-| **Withdrawals (L2→L1)** | Needs outbox-proof decoding plus the ~15-day challenge window. A different parser and a different mental model — that's the *next* slice, not this one. | It's half of "what happened to my funds". This is the first thing I'd build next. |
-| **FA token amounts** | Non-XTZ ticketers need per-token decimals. The parser handles the shape; the display says `token` rather than printing a number I can't verify. | Wrong numbers are worse than absent ones, so this stays until decimals are resolved properly. |
-| **Pagination beyond 200 deposits / 25 txs per layer** | A recency window answers the actual question. Full history is a scale problem, not an insight problem. | Users asking about deposits older than the window. |
-| **Any backend, DB, or indexer** | Both explorers send `access-control-allow-origin: *`, so a static page can query them directly. Zero infra, deploys anywhere. | Rate limits, or aggregate queries — the funnel metric above genuinely needs an indexer. |
-| **Visual polish** | The brief scores thinking over artefact and caps at 60 minutes. | — |
+| **Reading contract logic** | An audit is not a 60-minute job, and a shallow one is worse than none — it would imply a guarantee the tool can't make. | Step 1 above showing losses are code-level, not behavioural. |
+| **Proxy implementations** | We detect and flag a proxy but don't follow it. Behaviour lives in the implementation, so the classification is honestly marked low-confidence. | This is the top of the next-slice list — it's a correctness gap, not a missing feature. |
+| **Holder concentration / token approvals** | Both are real risk. Neither fits the time. | — |
+| **L1 token pricing** | TzKT gives no token prices, so only the XTZ leg is priced. Unpriced positions are excluded and labelled rather than guessed at. | Wrong numbers are worse than absent ones. |
+| **Exact L2 activity counts** | Blockscout paginates; we estimate from one page and say so in the UI. | Trivial to fix with an indexer, not worth it for a thin slice. |
+| **Cross-layer score comparison** | L1 has no source-verification concept, so L1 contracts structurally cap lower on transparency than L2 ones. | The asymmetry is real, but it makes the two layers' scores unfair to compare, and I'd want a per-layer normalisation before anyone ranks on this. |
 
 ## Honest state
-Working thin slice, real mainnet data, both directions verified. Not a product.
-The riskiest thing here is the assumption above, not the code.
+Working thin slice on live mainnet data, 23 scoring tests passing offline. The scoring is
+pure and isolated in `trust.js` so the weights are arguable rather than buried — I expect
+them to be wrong in places and wanted them cheap to change. **Heuristics, not an audit:**
+a good score is not a recommendation, and the UI says so.
