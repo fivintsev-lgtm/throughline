@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Throughline</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Throughline</h1>
+  <p class="tag">One user, two layers. Paste a Tezos&nbsp;L1 or Etherlink&nbsp;L2 address &mdash;
+     get the other half of the story.</p>
+</header>
+
+<form id="f">
+  <input id="q" spellcheck="false" autocomplete="off"
+         placeholder="tz1… / KT1… / 0x…" aria-label="Address">
+  <button type="submit">Trace</button>
+</form>
+
+<p class="examples">
+  Try:
+  <button class="ex" data-a="tz1UFH6EiW8aiUFisw7r3WBxXojUs9wULCrN">tz1UFH6E… (L1)</button>
+  <button class="ex" data-a="0x3276f9890DF42542B006eAED2db9b07D2FAD8b24">0x3276f989… (L2)</button>
+</p>
+
+<main id="out" aria-live="polite"></main>
+
+<footer>
+  Live data: <a href="https://api.tzkt.io">TzKT</a> (L1) &middot;
+  <a href="https://explorer.etherlink.com">Blockscout</a> (L2).
+  No backend, no keys &mdash; the page queries both explorers directly.
+  <a href="https://github.com/">Source</a>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
