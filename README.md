@@ -7,11 +7,15 @@ and a read on what the contract actually *is* — DEX, lending market, NFT marke
 Live mainnet data. No backend, no API keys, no build step.
 
 ```bash
-python3 -m http.server 8777   # then open http://127.0.0.1:8777
-node test.mjs                 # 23 scoring tests, no network needed
+python3 serve.py      # then open http://127.0.0.1:8777
+node test.mjs         # 23 scoring tests, no network needed
 ```
 
-(Must be served, not opened as `file://` — it uses ES modules.)
+Must be **served**, not opened as `file://` — it uses ES modules.
+
+`serve.py` is just `http.server` with no-cache headers. Browsers cache ES modules hard, so
+with the plain one-liner an edit can silently fail to show up and you end up debugging a
+stale page. If you do hit that, hard-reload (**Cmd+Shift+R**).
 
 ## The idea: wallets and contracts are not the same animal
 
